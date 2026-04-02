@@ -1,0 +1,11 @@
+*.nc
+*.zip
+*.csv
+*.npy
+*.npz
+*.xlsx
+*.txt
+*.png
+*.html
+*.pkl
+*.pth

@@ -1,0 +1,536 @@
+WQ_data_preprocessing: #处理水质数据
+       start_time : "2020-11-09 00:00:00"   # 全局统一开始时间，对齐时间
+       end_time : "2025-09-30 20:00:00"   # 全局统一结束时间（建议为某天的20:00，保证每天6个时刻完整）
+       input_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_original_dataset/"   # 原始水质数据文件夹路径
+       output_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_processed_dataset/"  # 处理后的水质数据的保存路径
+
+QX_subwatershed_sites:
+       input_csv: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流分区.csv"
+       output_xlsx: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx"
+       csv_encoding: "utf-8"
+       sheet_mapping:
+            1: "胜利"
+            2: "樟树港"
+            3: "捞刀河口"
+            4: "三角洲"
+            5: "桔子洲"
+            6: "西阳渡口"
+            7: "昭山"
+            8: "霞湾"
+            9: "涟水入河口"
+            10: "渌水入河口"
+            11: "街埠头"
+            12: "桐车湾"
+            13: "金鱼石"
+            14: "联江村"
+            15: "熬洲"
+            16: "草市镇"
+            17: "蒸水入湘江口"
+            18: "洣水入湘江口"
+            19: "耒水入湘江口"
+            20: "归阳镇"
+            21: "城北水厂"
+            22: "渡口大桥"
+            23: "诸葛庙"
+            24: "大河滩"
+            25: "舂陵水入湘江口"
+            26: "绿埠头"
+            27: "罗渡镇"      
+            28: "双牌水库"         
+       order:
+            - 26
+            - 28
+            - 23
+            - 20
+            - 27
+            - 25
+            - 21
+            - 24
+            - 19
+            - 14
+            - 17
+            - 22
+            - 16
+            - 18
+            - 15
+            - 12
+            - 13
+            - 10
+            - 8
+            - 6
+            - 11
+            - 9
+            - 7
+            - 5
+            - 4
+            - 3
+            - 1
+            - 2
+
+QX_precidata_preprocessing: #处理降雨数据
+       start_time : "2020-11-09 00:00:00"      # 起始日期（包含当天0点），这里的时间是北京时间，为了跟水质数据对齐
+       end_time : "2025-09-30 20:00:00"    # 结束日期（包含当天20点）
+       nc_path : '/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_preci'   # 降雨NC文件所在文件夹
+       lon_lat_path : '/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx'    # 站点Excel文件
+       output : '/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/QX/xiangjiang_processed_precipitation_data.npy'  # 输出文件路径，转换成个各自流域在时间段内的npy数据
+
+QX_otherdata_preprocessing: #处理降雨以外的气象数据，如温度、风速、气压、相对湿度、长波辐射、短波辐射等，因为降雨需要子流域内所有网格加和、这些只需平均值
+       start_time : "2020-11-09 00:00:00"      # 起始日期（包含当天0点）
+       end_time : "2025-09-30 20:00:00"    # 结束日期（包含当天20点）
+       nc_path : '/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_lwd'   # NC文件所在文件夹
+       lon_lat_path : '/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx'                     # 站点Excel文件
+       output : '/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/QX/xiangjiang_processed_lwd_data.npy'  # 输出文件
+       variable_name : 'downward_longwave_radiation' # NC文件中对应的变量名称，如温度可能是 'air_temperature'，风速可能是 'wind_speed'，气压可能是 'surface_pressure'，相对湿度可能是 'relative_humidity'，长波辐射可能是 'downward_longwave_radiation'，短波辐射可能是 'downward_shortwave_radiation'，根据实际情况修改
+
+QX_multifeature_preprocessing:
+       start_time: "2020-11-12 00:00:00"
+       end_time:   "2025-09-30 20:00:00"
+       lon_lat_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx"
+       output: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
+
+       variables:
+        precip:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_preci"
+           var_name: "precipitation"
+        temp:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_temp"
+           var_name: "air_temperature"
+        rh:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_rh"
+           var_name: "relative_humidity"
+        swd:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_swd"
+           var_name: "downward_shortwave_radiation"
+        lwd:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_lwd"
+           var_name: "downward_longwave_radiation"
+        wind:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_wind"
+           var_name: "wind_speed"
+        pres:
+           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_pres"
+           var_name: "surface_pressure"
+
+geo_matrix_construction:
+       input_path: "/home/fanyunkai/FYK_GCNLSTM/hanjiang/Subwatershed/hanjiang_15sits.csv"
+       output_path: "/home/fanyunkai/FYK_GCNLSTM/hanjiang/Subwatershed/adjacency_matrix.npy"
+       sigma: null                 # 若为 null 则自动计算（中位数）；若指定数值则使用该值，不用改
+       earth_radius: 6371.0        # 地球半径（千米）,不用改
+
+data_preprocessing:
+       input_qx_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/QX"
+       input_wq_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_processed_dataset/"
+       output_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem"
+       static_feature_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem/DEM/xiangjiang水质流域信息.csv"
+  
+       sites_names:
+       - "绿埠头"
+       - "双牌水库"
+       - "诸葛庙"
+       - "归阳镇"
+       - "罗渡镇"
+       - "舂陵水入湘江口"
+       - "城北水厂"
+       - "大河滩"
+       - "耒水入湘江口"
+       - "联江村"
+       - "蒸水入湘江口"
+       - "渡口大桥"
+       - "草市镇"
+       - "洣水入湘江口"
+       - "熬洲"
+       - "桐车湾"
+       - "金鱼石"
+       - "渌水入河口"
+       - "霞湾"
+       - "西阳渡口"
+       - "街埠头"
+       - "涟水入河口"
+       - "昭山"
+       - "桔子洲"
+       - "三角洲"
+       - "捞刀河口"
+       - "胜利"
+       - "樟树港"
+
+       include_feature_groups:
+        meteorology: true
+        time: true
+        static: true
+        water_quality: true
+        mask: true
+
+       qx_names:
+        precip: "xiangjiang_processed_precipitation_data.npy"
+        temp: "xiangjiang_processed_temp_data.npy"
+        wind: "xiangjiang_processed_wind_data.npy"
+        pres: "xiangjiang_processed_pres_data.npy"
+        rh: "xiangjiang_processed_rh_data.npy"
+        lwd: "xiangjiang_processed_lwd_data.npy"
+        swd: "xiangjiang_processed_swd_data.npy"
+
+       start_time: "2020-11-09 00:00:00"
+       time_frequency: "4H"
+
+       static_site_col: "流域名称"
+       static_ignore_cols:
+        - "流域名称"
+        - "子流域顺序"
+       static_feature_names:
+        - "平均dem"
+        - "坡度"
+        - "面积"
+        - "上游面积总和"
+        - "河流等级"
+        - "主河道长度"
+        - "是否干流"
+        - "耕地"
+        - "林地"
+        - "城镇"
+        - "农村"
+       wq_names:
+        - "总氮"
+        - "总磷"
+        - "水温"
+        - "pH"
+        - "溶解氧"
+       completion method:
+        总氮: "forward"
+        总磷: "forward"
+        水温: "forward"
+        pH: "forward"
+        溶解氧: "forward"
+       wq_log:
+        - "precip"
+       LOG_OFFSET: 0.01
+       MASK_SUFFIX: "_mask"
+
+QXmultidata_preprocessing:
+       input_qx_npy: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
+       input_qx_feature_names_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_feature_names.pkl"
+       input_qx_metadata: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_metadata.npz"
+       input_wq_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_processed_dataset/"
+       output_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature"
+       static_feature_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem/DEM/xiangjiang水质流域信息.csv"
+  
+       sites_names:
+       - "绿埠头"
+       - "双牌水库"
+       - "诸葛庙"
+       - "归阳镇"
+       - "罗渡镇"
+       - "舂陵水入湘江口"
+       - "城北水厂"
+       - "大河滩"
+       - "耒水入湘江口"
+       - "联江村"
+       - "蒸水入湘江口"
+       - "渡口大桥"
+       - "草市镇"
+       - "洣水入湘江口"
+       - "熬洲"
+       - "桐车湾"
+       - "金鱼石"
+       - "渌水入河口"
+       - "霞湾"
+       - "西阳渡口"
+       - "街埠头"
+       - "涟水入河口"
+       - "昭山"
+       - "桔子洲"
+       - "三角洲"
+       - "捞刀河口"
+       - "胜利"
+       - "樟树港"
+
+       include_feature_groups:
+        meteorology: true
+        time: true
+        static: true
+        water_quality: true
+        mask: true
+
+       start_time: "2020-11-12 00:00:00"
+       time_frequency: "4H"
+
+       static_site_col: "流域名称"
+       static_ignore_cols:
+        - "流域名称"
+        - "子流域顺序"
+       static_feature_names:
+        - "平均dem"
+        - "坡度"
+        - "面积"
+        - "上游面积总和"
+        - "河流等级"
+        - "主河道长度"
+        - "是否干流"
+        - "耕地"
+        - "林地"
+        - "城镇"
+        - "农村"
+       wq_names:
+        - "总氮"
+        - "总磷"
+        - "水温"
+        - "pH"
+        - "溶解氧"
+       completion method:
+        总氮: "forward"
+        总磷: "forward"
+        水温: "forward"
+        pH: "forward"
+        溶解氧: "forward"
+       wq_log:
+        - "P4"
+        - "P8"
+        - "P12"
+        - "P24"
+        - "P48"
+        - "P72"
+        - "Imax24"
+        - "API72"
+       LOG_OFFSET: 0.01
+       MASK_SUFFIX: "_mask"
+
+
+GCNLSTM_training:
+  SEQ_LEN: 6
+  BATCH_SIZE: 32
+  GCN_HIDDEN: 16
+  LSTM_HIDDEN: 64
+  OUTPUT_DIM: 1
+  LEARNING_RATE: 0.0001
+  PATIENCE: 5
+  MAX_EPOCHS: 300
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  DATA_PATH: "/home/fanyunkai/FYK_GCNLSTM/hanjiang/preprocessed_data.npy"
+  ADJ_PATH: "/home/fanyunkai/FYK_GCNLSTM/hanjiang/Subwatershed/adjacency_matrix.npy"
+  OUTPUT_DIR: "/home/fanyunkai/FYK_GCNLSTM/hanjiang/results"
+  feature_names:
+    - year_offset
+    - precip
+    - temp
+    - wind
+    - pres
+    - rh
+    - lwd
+    - swd
+    - 总氮
+    - 总磷
+    - 水温
+    - pH
+    - 溶解氧
+    - hour_sin
+    - hour_cos
+    - month_sin
+    - month_cos
+    - 总氮_mask
+    - 总磷_mask
+    - 水温_mask
+    - pH_mask
+    - 溶解氧_mask
+
+  # 目标变量名称（必须是 feature_names 的子集）
+  target_names:
+    - 总氮
+
+GATLSTM_training:
+  SEQ_LEN: 12
+  BATCH_SIZE: 32
+  GCN_HIDDEN: 32                # GAT隐层维度（与代码中读取键保持一致）
+  LSTM_HIDDEN: 64
+  OUTPUT_DIM: 5                  # 预测目标数量（这里只有总氮）
+  LEARNING_RATE: 0.0001
+  PATIENCE: 5
+  MAX_EPOCHS: 300
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  NUM_HEADS: 4                   # 新增：GAT注意力头数（默认1，这里设为4）
+  DATA_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/preprocessed_data_with_runoff.npy"
+  FEATURE_NAMES_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/feature_names_with_runoff.pkl"
+  ADJ_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem/GEO/GAT支流接邻矩阵.csv"
+  OUTPUT_DIR: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/results"
+
+  # 这里只决定 X 送进模型的特征，不决定 y
+  # 想做消融就直接增删这里的名字
+  input_feature_names:
+    - P4
+    - P8
+    - P12
+    - P24
+    - P48
+    - P72
+    - Imax24
+    - API72
+    - T_now
+    - T24_mean
+    - RH_now
+    - RH24_mean
+    - SWD_now
+    - SWD24_mean
+    - LWD24_mean
+    - Wind24_mean
+    - Pres_now
+    - hour_sin
+    - hour_cos
+    - month_sin
+    - month_cos
+    - year_offset
+    - 平均dem
+    - 坡度
+    - 面积
+    - 上游面积总和
+    - 河流等级
+    - 主河道长度
+    - 是否干流
+    - 耕地
+    - 林地
+    - 城镇
+    - 农村
+    - runoff
+    - 总氮
+    - 总氮_mask
+    - pH
+    - pH_mask
+
+  # 这里只决定 X 中哪些列要标准化
+  # 不写的话，代码会退回到旧逻辑：非 mask 且非 sin/cos 的输入列自动标准化
+  standardize_feature_names:
+    - P4
+    - P8
+    - P12
+    - P24
+    - P48
+    - P72
+    - Imax24
+    - API72
+    - T_now
+    - T24_mean
+    - RH_now
+    - RH24_mean
+    - SWD_now
+    - SWD24_mean
+    - LWD24_mean
+    - Wind24_mean
+    - Pres_now
+    - year_offset
+    - 平均dem
+    - 坡度
+    - 面积
+    - 上游面积总和
+    - 河流等级
+    - 主河道长度
+    - 是否干流
+    - 耕地
+    - 林地
+    - 城镇
+    - 农村
+    - runoff
+    - 总氮
+    - pH
+    
+  # 目标变量名称（必须是 feature_names 的子集）
+  target_names:
+    - "总氮"
+    - "总磷"
+    - "水温"
+    - "pH"
+    - "溶解氧"
+
+
+stations_val:
+  OUTPUT_DIR: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/results"
+  PARAM_NAMES:
+    - "总氮"
+    - "总磷"
+    - "水温"
+    - "pH"
+    - "溶解氧"
+
+  STATION_NAMES: null     # 设为 null 则自动使用 "站点0", "站点1", ...；也可指定列表，如 ["归阳镇", "城北水厂", ...]，不用改
+  MAKE_PLOTLY_TS: true #不用改
+  DOWNSAMPLE: 1 #不用改
+  SHOW_ONLY_KNOWN: true #不用改
+  VAL_STYLE: "rug" #不用改
+
+
+
+mask_preprocessing:
+  # ----- 输入输出路径 -----
+  input_qx_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/QX"      # 气象数据目录（存放 .npy 文件）
+  input_wq_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_processed_dataset"  # 水质 CSV 目录
+  output_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang6/results"           # 预处理输出目录（与训练输出目录相同）
+
+  # ----- 站点列表（顺序必须与气象文件的列顺序一致）-----
+  sites_names:
+         - 绿埠头
+         - 双牌水库
+         - 诸葛庙
+         - 归阳镇
+         - 罗渡镇
+         - 舂陵水入湘江口
+         - 城北水厂
+         - 大河滩
+         - 耒水入湘江口
+         - 联江村
+         - 蒸水入湘江口
+         - 渡口大桥
+         - 草市镇
+         - 洣水入湘江口
+         - 熬洲
+         - 桐车湾
+         - 金鱼石
+         - 渌水入河口
+         - 霞湾
+         - 西阳渡口
+         - 街埠头
+         - 涟水入河口
+         - 昭山
+         - 桔子洲
+         - 三角洲
+         - 捞刀河口
+         - 胜利
+         - 樟树港
+  # ----- 气象文件映射（文件名对应变量）-----
+  qx_names:
+    precip: "xiangjiang_processed_precipitation_data.npy"
+    temp:   "xiangjiang_processed_temp_data.npy"
+    wind:   "xiangjiang_processed_wind_data.npy"
+    pres:   "xiangjiang_processed_pres_data.npy"
+    rh:     "xiangjiang_processed_rh_data.npy"
+    lwd:    "xiangjiang_processed_lwd_data.npy"
+    swd:    "xiangjiang_processed_swd_data.npy"
+
+  # ----- 水质目标变量（需与 CSV 中的列名一致）-----
+  wq_names:
+    - 总氮
+    - 总磷
+    - 水温
+    - pH
+    - 溶解氧
+
+  # ----- 缺失值填充策略（特征名 -> 方法）-----
+  completion method:
+    总氮: "forward"
+    总磷: "forward"
+    水温: "forward"
+    pH: "forward"
+    溶解氧: "forward"
+  # ----- 对数变换配置（对哪些特征做 log10(x+offset)）-----
+  wq_log:
+    - precip
+  LOG_OFFSET: 0.01
+
+  # ----- 时间序列参数 -----
+  start_time: "2020-11-09 00:00:00"
+  time_frequency: "4H"
+
+  # ----- 是否生成掩码特征（必须为 True，因为模型需要掩码）-----
+  include_mask: true
+  MASK_SUFFIX: "_mask"
