@@ -15,7 +15,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"使用的设备: {device}")
 
 # ==================== 从 configs.yaml 读取配置 ====================
-CONFIG_PATH = "configs.yaml"
+CONFIG_PATH = "/home/fanyunkai/FYK_biGATLSTM/configs.yaml"
 
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config_all = yaml.safe_load(f)
@@ -24,7 +24,7 @@ cfg = config_all.get('GATLSTM_training', {})
 
 SEQ_LEN = cfg.get('SEQ_LEN')
 BATCH_SIZE = cfg.get('BATCH_SIZE')
-GAT_HIDDEN = cfg.get('GCN_HIDDEN')          # 保持键名不变，方便兼容
+GAT_HIDDEN = cfg.get('GCN_HIDDEN')
 LSTM_HIDDEN = cfg.get('LSTM_HIDDEN')
 OUTPUT_DIM = cfg.get('OUTPUT_DIM')
 LEARNING_RATE = cfg.get('LEARNING_RATE')
@@ -34,7 +34,7 @@ TRAIN_RATIO = cfg.get('TRAIN_RATIO')
 VAL_RATIO = cfg.get('VAL_RATIO')
 TEST_RATIO = cfg.get('TEST_RATIO')
 SEED = cfg.get('SEED')
-NUM_HEADS = cfg.get('NUM_HEADS')  # 默认为单头注意力
+NUM_HEADS = cfg.get('NUM_HEADS')
 
 DATA_PATH = cfg.get('DATA_PATH')
 FEATURE_NAMES_PATH = cfg.get('FEATURE_NAMES_PATH')
@@ -43,17 +43,14 @@ OUTPUT_DIR = cfg.get('OUTPUT_DIR')
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 目标变量名称（在配置文件中指定）
 TARGET_NAMES = cfg.get('target_names', [])
-
-# 这次实际送入 X 的特征名（只控制输入）
 INPUT_FEATURE_NAMES = cfg.get('input_feature_names', cfg.get('feature_names', []))
-
-# 这次对 X 中哪些特征做标准化（只控制输入 X）
 STANDARDIZE_FEATURE_NAMES = cfg.get('standardize_feature_names', None)
 
-# 掩码后缀（与预处理一致）
 MASK_SUFFIX = cfg.get('MASK_SUFFIX', '_mask')
+
+# dt 特征名后缀，仅用于你后面识别配置方便，不参与特殊逻辑
+DT_SUFFIX = cfg.get('DT_SUFFIX', '_dt')
 
 
 def set_seed(seed=42):
@@ -71,7 +68,7 @@ set_seed(SEED)
 
 # ==================== 数据加载 ====================
 print("加载数据...")
-full_data = np.load(DATA_PATH).astype(np.float32)    # (T, N, F_full) 未标准化原始数据
+full_data = np.load(DATA_PATH).astype(np.float32)
 with open(FEATURE_NAMES_PATH, 'rb') as f:
     all_feature_names = pickle.load(f)
 
@@ -84,19 +81,17 @@ if not TARGET_NAMES:
 if not INPUT_FEATURE_NAMES:
     raise ValueError("配置文件中 input_feature_names 不能为空")
 
-# 检查输入特征是否存在
 missing_input = [name for name in INPUT_FEATURE_NAMES if name not in all_feature_names]
 if missing_input:
     raise ValueError(f"以下 input_feature_names 不存在于预处理特征中: {missing_input}")
 
-# 检查目标特征是否存在
 missing_target = [name for name in TARGET_NAMES if name not in all_feature_names]
 if missing_target:
     raise ValueError(f"以下 target_names 不存在于预处理特征中: {missing_target}")
 
-# 确定 X / y / mask 的索引
 INPUT_IDXS = [all_feature_names.index(name) for name in INPUT_FEATURE_NAMES]
 TARGET_IDXS = [all_feature_names.index(name) for name in TARGET_NAMES]
+
 MASK_IDXS = []
 for name in TARGET_NAMES:
     mask_name = name + MASK_SUFFIX
@@ -107,9 +102,8 @@ for name in TARGET_NAMES:
 print(f"本次输入特征 ({len(INPUT_FEATURE_NAMES)} 个): {INPUT_FEATURE_NAMES}")
 print(f"本次目标特征 ({len(TARGET_NAMES)} 个): {TARGET_NAMES}")
 
-# 从完整数据中抽取本次真正使用的数据
-x_full = full_data[:, :, INPUT_IDXS]     # (T, N, F_in)
-y_full = full_data[:, :, TARGET_IDXS]    # (T, N, F_out)
+x_full = full_data[:, :, INPUT_IDXS]     # (T, N, F_in)，允许有 NaN
+y_full = full_data[:, :, TARGET_IDXS]    # (T, N, F_out)，允许有 NaN
 mask_full = full_data[:, :, MASK_IDXS]   # (T, N, F_out)
 
 F_in = x_full.shape[-1]
@@ -117,7 +111,6 @@ F_out = y_full.shape[-1]
 print(f"X 形状: {x_full.shape}, y 形状: {y_full.shape}, mask 形状: {mask_full.shape}")
 
 # ==================== 划分原始数据（未标准化） ====================
-# 为避免验证集和测试集样本使用训练集的历史数据，我们为每个集预留 SEQ_LEN 个缓冲
 train_len = int(T * TRAIN_RATIO)
 val_len = int(T * VAL_RATIO)
 test_len = T - train_len - val_len
@@ -130,7 +123,6 @@ if test_start + SEQ_LEN > T:
     test_start = max(test_start, train_len + SEQ_LEN + 1)
     test_len = T - test_start
 
-# X / y / mask 分开切分
 train_x_raw = x_full[:train_len]
 val_x_raw = x_full[val_start:val_start + val_len]
 test_x_raw = x_full[test_start:test_start + test_len]
@@ -147,8 +139,6 @@ print(f"训练集原始时间步: {train_x_raw.shape[0]}, 验证集: {val_x_raw.
 
 # ==================== 确定需要标准化的 X 特征列 ====================
 if STANDARDIZE_FEATURE_NAMES is None:
-    # 若配置中未指定，则沿用旧逻辑，但只作用于 X：
-    # 排除 mask 列和 sin/cos 特征，其余 X 特征全部标准化
     norm_indices = []
     standardize_names_used = []
     for i, name in enumerate(INPUT_FEATURE_NAMES):
@@ -175,63 +165,107 @@ else:
 
 print(f"X 中需要标准化的特征 ({len(standardize_names_used)} 个): {standardize_names_used}")
 
-# ==================== 计算训练集 X 的统计量 ====================
-train_x_flat = train_x_raw.reshape(-1, F_in)
-if len(norm_indices) > 0:
-    x_means = np.mean(train_x_flat[:, norm_indices], axis=0)
-    x_stds = np.std(train_x_flat[:, norm_indices], axis=0)
-    x_stds[x_stds == 0] = 1.0
-else:
-    x_means = np.array([], dtype=np.float32)
-    x_stds = np.array([], dtype=np.float32)
+# ==================== 计算训练集 X 的统计量（忽略 NaN） ====================
+def fit_x_scaler_nanaware(x_data, norm_indices, input_feature_names):
+    means = []
+    stds = []
+    used_names = []
 
-# ==================== 计算训练集 y 的统计量（target_names 一律标准化） ====================
-# 只用训练集中 mask=1 的真实观测来计算每个目标的均值和标准差
+    for idx in norm_indices:
+        vals = x_data[..., idx].reshape(-1)
+        valid = ~np.isnan(vals)
 
+        if np.sum(valid) == 0:
+            print(f"警告：输入特征 {input_feature_names[idx]} 在训练集中全是 NaN，标准化参数将设为 mean=0,std=1")
+            mean = 0.0
+            std = 1.0
+        else:
+            mean = float(np.mean(vals[valid]))
+            std = float(np.std(vals[valid]))
+            if std == 0:
+                std = 1.0
+
+        means.append(mean)
+        stds.append(std)
+        used_names.append(input_feature_names[idx])
+
+    return np.array(means, dtype=np.float32), np.array(stds, dtype=np.float32), used_names
+
+
+x_means, x_stds, standardize_names_used = fit_x_scaler_nanaware(
+    train_x_raw, norm_indices, INPUT_FEATURE_NAMES
+)
+
+# ==================== 计算训练集 y 的统计量（只用 mask=1 的真实观测） ====================
 def fit_target_scaler(y_data, mask_data, target_names):
     y_means = np.zeros(len(target_names), dtype=np.float32)
     y_stds = np.ones(len(target_names), dtype=np.float32)
 
     for i, name in enumerate(target_names):
         valid_values = y_data[:, :, i][mask_data[:, :, i] > 0.5]
+        valid_values = valid_values[~np.isnan(valid_values)]
+
         if valid_values.size == 0:
             raise ValueError(f"目标 {name} 在训练集中没有任何有效观测，无法标准化")
+
         y_means[i] = np.mean(valid_values)
         y_stds[i] = np.std(valid_values)
         if y_stds[i] == 0:
             y_stds[i] = 1.0
+
     return y_means, y_stds
 
 
 y_means, y_stds = fit_target_scaler(train_y_raw, train_mask_raw, TARGET_NAMES)
 print(f"y 将按 target_names 自动标准化: {TARGET_NAMES}")
 
-# ==================== 标准化 X 和 y ====================
-def apply_standardization(data, norm_indices, means, stds):
-    """对数据中指定索引的特征进行标准化"""
+# ==================== 标准化 X 和 y（保留 NaN，后面再统一填0） ====================
+def apply_standardization_nanaware(data, norm_indices, means, stds):
+    """
+    对数据中指定索引的特征进行标准化，只作用于非 NaN 位置。
+    """
     data_norm = data.copy()
     for idx, mean, std in zip(norm_indices, means, stds):
-        data_norm[..., idx] = (data_norm[..., idx] - mean) / std
+        valid = ~np.isnan(data_norm[..., idx])
+        data_norm[..., idx][valid] = (data_norm[..., idx][valid] - mean) / std
     return data_norm
 
 
-def apply_target_standardization(y_data, means, stds):
-    """对所有目标变量进行标准化"""
+def apply_target_standardization_nanaware(y_data, mask_data, means, stds):
+    """
+    对目标变量做标准化，只作用于 mask=1 且非 NaN 的位置。
+    其余位置保持 NaN，后面统一填0。
+    """
     y_norm = y_data.copy()
     for i, (mean, std) in enumerate(zip(means, stds)):
-        y_norm[..., i] = (y_norm[..., i] - mean) / std
+        valid = (mask_data[..., i] > 0.5) & (~np.isnan(y_norm[..., i]))
+        y_norm[..., i][valid] = (y_norm[..., i][valid] - mean) / std
     return y_norm
 
 
-train_x = apply_standardization(train_x_raw, norm_indices, x_means, x_stds)
-val_x   = apply_standardization(val_x_raw,   norm_indices, x_means, x_stds)
-test_x  = apply_standardization(test_x_raw,  norm_indices, x_means, x_stds)
+train_x = apply_standardization_nanaware(train_x_raw, norm_indices, x_means, x_stds)
+val_x   = apply_standardization_nanaware(val_x_raw,   norm_indices, x_means, x_stds)
+test_x  = apply_standardization_nanaware(test_x_raw,  norm_indices, x_means, x_stds)
 
-train_y = apply_target_standardization(train_y_raw, y_means, y_stds)
-val_y   = apply_target_standardization(val_y_raw,   y_means, y_stds)
-test_y  = apply_target_standardization(test_y_raw,  y_means, y_stds)
+train_y = apply_target_standardization_nanaware(train_y_raw, train_mask_raw, y_means, y_stds)
+val_y   = apply_target_standardization_nanaware(val_y_raw,   val_mask_raw,   y_means, y_stds)
+test_y  = apply_target_standardization_nanaware(test_y_raw,  test_mask_raw,  y_means, y_stds)
 
-print("X 与 y 标准化完成。")
+print("X 与 y 标准化完成（目前仍保留 NaN）。")
+
+# ==================== 标准化后统一把 NaN 换成 0 ====================
+def replace_nan_with_zero(arr):
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+train_x = replace_nan_with_zero(train_x)
+val_x   = replace_nan_with_zero(val_x)
+test_x  = replace_nan_with_zero(test_x)
+
+train_y = replace_nan_with_zero(train_y)
+val_y   = replace_nan_with_zero(val_y)
+test_y  = replace_nan_with_zero(test_y)
+
+print("已将标准化后的 X / y 中所有 NaN 统一替换为 0。")
 
 # ==================== 保存标准化参数 ====================
 scaler_params = {
@@ -254,25 +288,19 @@ print("标准化参数已保存到 scaler.pkl")
 def build_samples(x_data, y_data, mask_data, seq_len):
     """
     为给定数据集构建样本，每个样本使用 seq_len 个历史时间步。
-    参数：
-        x_data: (T, N, F_in) 标准化后的输入数据
-        y_data: (T, N, F_out) 标准化后的目标数据
-        mask_data: (T, N, F_out) 目标掩码
-        seq_len: 历史窗口长度
-    返回：
-        X: (num_samples, seq_len, N, F_in)
-        y: (num_samples, N, F_out)
-        mask: (num_samples, N, F_out)
     """
     T_local = x_data.shape[0]
     X_list, y_list, mask_list = [], [], []
+
     for t in range(seq_len, T_local):
         X_window = x_data[t - seq_len:t]
         y_t = y_data[t]
         mask_t = mask_data[t]
+
         X_list.append(X_window)
         y_list.append(y_t)
         mask_list.append(mask_t)
+
     return np.stack(X_list), np.stack(y_list), np.stack(mask_list)
 
 
@@ -326,7 +354,6 @@ elif file_ext == '.csv':
 else:
     raise ValueError(f"不支持的文件格式: {file_ext}，请使用 .npy 或 .csv")
 
-# 转换为二值矩阵并添加自环
 adj_binary = (adj != 0).astype(np.float32)
 np.fill_diagonal(adj_binary, 1.0)
 
@@ -364,19 +391,19 @@ class GraphAttentionLayer(nn.Module):
 
         head_outputs = []
         for h in range(self.num_heads):
-            Wh = self.W[h](x)  # (batch, N, out_features)
+            Wh = self.W[h](x)
             a = self.a[h]
 
             Wh_i = Wh.unsqueeze(2).expand(-1, -1, N_local, -1)
             Wh_j = Wh.unsqueeze(1).expand(-1, N_local, -1, -1)
-            a_input = torch.cat([Wh_i, Wh_j], dim=-1)  # (batch, N, N, 2*out_features)
+            a_input = torch.cat([Wh_i, Wh_j], dim=-1)
 
-            e = self.leakyrelu(torch.matmul(a_input, a).squeeze(-1))  # (batch, N, N)
+            e = self.leakyrelu(torch.matmul(a_input, a).squeeze(-1))
             e = e.masked_fill(adj_mask == 0, float('-inf'))
             attention = torch.softmax(e, dim=-1)
             attention = self.dropout(attention)
 
-            h_prime = torch.matmul(attention, Wh)  # (batch, N, out_features)
+            h_prime = torch.matmul(attention, Wh)
             head_outputs.append(h_prime)
 
         if self.concat:
@@ -421,7 +448,10 @@ class GAT_LSTM(nn.Module):
         return pred
 
 
-# 初始化模型
+if OUTPUT_DIM is None or OUTPUT_DIM != F_out:
+    OUTPUT_DIM = F_out
+    print(f"OUTPUT_DIM 已自动设置为目标维度: {OUTPUT_DIM}")
+
 model = GAT_LSTM(
     node_num=N,
     input_dim=F_in,
@@ -444,7 +474,6 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode='min', patience=5, factor=0.5
 )
 
-# ==================== 训练准备 ====================
 best_val_loss = float('inf')
 counter = 0
 
@@ -534,7 +563,6 @@ print(f"测试结果已保存到 {OUTPUT_DIR}")
 
 # ==================== 保存训练集和验证集预测结果 ====================
 def save_predictions(loader, name):
-    """对指定 DataLoader 进行预测并保存结果"""
     all_preds = []
     all_targets = []
     all_masks = []
@@ -578,7 +606,7 @@ print(f"RMSE: {rmse:.4f}")
 print(f"MAE: {mae:.4f}")
 
 with open(os.path.join(OUTPUT_DIR, 'Configs and results.txt'), 'w', encoding='utf-8') as f:
-    f.write("========== Configuration ==========" + "\n")
+    f.write("========== Configuration ==========\n")
     f.write(f"SEQ_LEN: {SEQ_LEN}\n")
     f.write(f"BATCH_SIZE: {BATCH_SIZE}\n")
     f.write(f"GAT_HIDDEN: {GAT_HIDDEN}\n")

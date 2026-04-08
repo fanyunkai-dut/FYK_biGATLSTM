@@ -1,13 +1,13 @@
 import numpy as np
 
 # 加载数据
-data = np.load('/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy', allow_pickle=True)  # 请替换为实际文件路径
+data = np.load('/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy', allow_pickle=True)  # 请替换为实际文件路径
 
 # 检查维度
 if data.ndim == 3:
     print(f"三维数据，形状: {data.shape}")
     # 查看第15个站点（索引14）的前5个时间步的所有特征
-    station_idx = 0
+    station_idx = 27
     time_steps = 3
     if station_idx < data.shape[1]:
         subset = data[:time_steps, station_idx, :]

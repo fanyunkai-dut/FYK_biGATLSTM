@@ -1,21 +1,3 @@
-"""
-GCN-LSTM / GAT-LSTM 数据预处理流水线
-输入：
-    - 气象数据：一个 3D .npy 文件，形状 (T, S, F_met)
-    - 水质数据：每个站点一个 CSV，文件名格式为 站点名.csv
-    - 子流域静态特征：一个 CSV，按站点名匹配
-输出：
-    - preprocessed_data.npy : 形状 (T, S, F) 的原始尺度数组
-    - feature_names.pkl     : 特征名称列表
-    - metadata.npz          : 时间、站点、特征名
-
-说明：
-    1. 特征大类开关只用于“本预处理脚本里决定拼哪些特征”，不服务于训练代码。
-    2. 最终拼接顺序固定为：气象 -> 时间 -> 静态 -> 水质 -> 掩码
-    3. 水质按气象 metadata.npz 里的时间轴自动对齐，不再按长度硬截断。
-    4. 时间特征也直接基于气象 metadata.npz 的时间轴生成。
-"""
-
 import os
 import pickle
 import numpy as np
@@ -23,7 +5,7 @@ import pandas as pd
 import yaml
 
 # ==================== 从 configs.yaml 读取配置 ====================
-CONFIG_PATH = "/home/fanyunkai/FYK_GCNLSTM/configs.yaml"
+CONFIG_PATH = "/home/fanyunkai/FYK_biGATLSTM/configs.yaml"
 
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config_all = yaml.safe_load(f)
@@ -43,10 +25,10 @@ site_names_ordered = cfg.get('sites_names', [])
 
 # ---------- 气象 / 水质 ----------
 wq_fields = cfg.get('wq_names', [])
-fill_strategies = cfg.get('completion method', {})
 log_features = cfg.get('wq_log', [])
 LOG_OFFSET = cfg.get('LOG_OFFSET', 0.01)
 MASK_SUFFIX = cfg.get('MASK_SUFFIX', '_mask')
+DT_SUFFIX = cfg.get('DT_SUFFIX', '_dt')
 
 # ---------- 时间 ----------
 START_DATE = cfg.get('start_time')
@@ -60,14 +42,13 @@ INCLUDE_STATIC = include_groups.get('static', False)
 INCLUDE_WQ = include_groups.get('water_quality', True)
 INCLUDE_MASK = include_groups.get('mask', True)
 
-# 向后兼容：若旧配置还保留 include_mask，则仅在新开关未显式提供 mask 时兜底
 if 'mask' not in include_groups:
     INCLUDE_MASK = cfg.get('include_mask', True)
 
 # ---------- 静态特征 ----------
 STATIC_SITE_COL = cfg.get('static_site_col', '流域名称')
 STATIC_IGNORE_COLS = cfg.get('static_ignore_cols', ['流域名称', '子流域顺序'])
-STATIC_FEATURE_NAMES = cfg.get('static_feature_names', None)  # None 表示自动选取可用列
+STATIC_FEATURE_NAMES = cfg.get('static_feature_names', None)
 
 
 # ==================================================
@@ -158,12 +139,36 @@ def load_meteorology(npy_path, feature_names_path, meta_path, expected_sites):
     return meteo_data, meteo_names, meta_times
 
 
-def load_water_quality(data_dir, site_names, wq_fields, target_time_index):
+def compute_dt_since_last_obs(mask_1d):
+    """
+    mask_1d: 1 表示有真实观测，0 表示缺失
+    返回：
+        dt_1d: 距离上一次真实观测过去了多少个时间步
+        约定：
+            - 当前有观测 -> dt = 0
+            - 当前缺失且前面从未观测 -> dt 逐步累加为 1, 2, 3, ...
+            - 当前缺失且前面有观测 -> 从上次真实观测后开始累加
+    """
+    dt = np.zeros_like(mask_1d, dtype=np.float32)
+    gap = 0.0
+    for t in range(len(mask_1d)):
+        if mask_1d[t] > 0.5:
+            gap = 0.0
+            dt[t] = 0.0
+        else:
+            gap += 1.0
+            dt[t] = gap
+    return dt
+
+
+def load_water_quality(data_dir, site_names, wq_fields, target_time_index, dt_suffix='_dt'):
     """
     读取水质数据并按 target_time_index 对齐
     返回：
-        wq_array   : (T, S, F_wq)
+        wq_array   : (T, S, F_wq)   保留原始 NaN，不做填充
         mask_array : (T, S, F_wq)
+        dt_array   : (T, S, F_wq)
+        dt_feature_names: list[str]
     """
     if not wq_fields:
         raise ValueError("wq_names 为空，无法加载水质特征。")
@@ -175,6 +180,8 @@ def load_water_quality(data_dir, site_names, wq_fields, target_time_index):
 
     wq_array = np.full((T, S, F_wq), np.nan, dtype=np.float32)
     mask_array = np.zeros((T, S, F_wq), dtype=np.float32)
+    dt_array = np.zeros((T, S, F_wq), dtype=np.float32)
+    dt_feature_names = [f"{f}{dt_suffix}" for f in wq_fields]
 
     for i, site in enumerate(site_names):
         csv_path = os.path.join(data_dir, f"{site}.csv")
@@ -201,19 +208,23 @@ def load_water_quality(data_dir, site_names, wq_fields, target_time_index):
             series = series.groupby(level=0).last()
 
             aligned = series.reindex(target_time_index)
+            aligned_values = aligned.values.astype(np.float32)
+            aligned_mask = (~np.isnan(aligned_values)).astype(np.float32)
+            aligned_dt = compute_dt_since_last_obs(aligned_mask)
 
-            wq_array[:, i, j] = aligned.values.astype(np.float32)
-            mask_array[:, i, j] = (~np.isnan(aligned.values)).astype(np.float32)
+            wq_array[:, i, j] = aligned_values
+            mask_array[:, i, j] = aligned_mask
+            dt_array[:, i, j] = aligned_dt
 
             orig_valid = int(np.sum(~np.isnan(series.values)))
-            aligned_valid = int(np.sum(~np.isnan(aligned.values)))
+            aligned_valid = int(np.sum(~np.isnan(aligned_values)))
             if len(series) != T:
                 print(
                     f"站点 {site} 的 {field}: 原长度 {len(series)}，"
                     f"按气象时间轴对齐后长度 {T}，有效值 {orig_valid}->{aligned_valid}"
                 )
 
-    return wq_array, mask_array
+    return wq_array, mask_array, dt_array, dt_feature_names
 
 
 def load_static_features(static_csv_path, site_names, site_col, ignore_cols=None, selected_features=None):
@@ -274,40 +285,8 @@ def load_static_features(static_csv_path, site_names, site_col, ignore_cols=None
     return static_data, static_feature_names
 
 
-def fill_missing(data, feature_names, fill_strategies, mask_suffix='_mask'):
-    """
-    对数值特征（不包括掩码）进行缺失值填充。
-    只允许 'zero' 或 'forward'。
-    """
-    filled = data.copy()
-
-    for i, name in enumerate(feature_names):
-        if name.endswith(mask_suffix):
-            continue
-
-        strategy = fill_strategies.get(name, 'forward')
-        col = filled[..., i]
-
-        if strategy == 'zero':
-            col = np.nan_to_num(col, nan=0.0)
-        elif strategy == 'forward':
-            for s in range(col.shape[1]):
-                series = col[:, s]
-                if np.isnan(series).any():
-                    series = pd.Series(series).ffill().to_numpy()
-                    if np.isnan(series).any():
-                        series = np.where(np.isnan(series), 0.0, series)
-                col[:, s] = series
-        else:
-            raise ValueError(f"未知填充策略: {strategy}，只允许 'zero' 或 'forward'")
-
-        filled[..., i] = col
-
-    return filled
-
-
 def log_transform(data, feature_names, log_features, offset=0.01):
-    """对指定特征做 log10(x + offset) 变换"""
+    """对指定特征做 log10(x + offset) 变换，NaN 保持 NaN"""
     transformed = data.copy()
     for name in log_features:
         if name not in feature_names:
@@ -333,6 +312,7 @@ def main():
     print(f"  static: {INCLUDE_STATIC}")
     print(f"  water_quality: {INCLUDE_WQ}")
     print(f"  mask: {INCLUDE_MASK}")
+    print("  dt: True")
 
     T = None
     meteo_time_index = None
@@ -408,18 +388,19 @@ def main():
         feature_names.extend(static_feature_names)
         print(f"静态特征形状: {static_data.shape}, 特征: {static_feature_names}")
 
-    # ---------- 水质 / 掩码 ----------
+    # ---------- 水质 / 掩码 / dt ----------
     need_wq_loading = INCLUDE_WQ or INCLUDE_MASK
     if need_wq_loading:
         if meteo_time_index is None:
             raise ValueError("当前脚本要求水质按气象 metadata 时间轴对齐，因此必须启用 meteorology 并提供 input_qx_metadata。")
 
-        print("加载水质数据并按气象时间轴对齐生成掩码...")
-        wq_array, mask_array = load_water_quality(
+        print("加载水质数据并按气象时间轴对齐生成 mask 和 dt...")
+        wq_array, mask_array, dt_array, dt_feature_names = load_water_quality(
             WATER_QUALITY_DIR,
             site_names,
             wq_fields,
-            meteo_time_index
+            meteo_time_index,
+            dt_suffix=DT_SUFFIX
         )
 
         if INCLUDE_WQ:
@@ -433,25 +414,21 @@ def main():
             feature_names.extend(mask_feature_names)
             print(f"掩码特征形状: {mask_array.shape}, 特征: {mask_feature_names}")
 
+        feature_blocks.append(dt_array)
+        feature_names.extend(dt_feature_names)
+        print(f"dt 特征形状: {dt_array.shape}, 特征: {dt_feature_names}")
+
     if not feature_blocks:
         raise ValueError("没有任何特征被选中，无法构造数据集。")
 
-    # 固定顺序：气象 -> 时间 -> 静态 -> 水质 -> 掩码
+    # 固定顺序：气象 -> 时间 -> 静态 -> 水质 -> 掩码 -> dt
     all_data = np.concatenate(feature_blocks, axis=-1)
     print(f"拼接后数据形状: {all_data.shape}")
     print(f"特征顺序: {feature_names}")
 
-    print("进行缺失值填充...")
-    all_data_filled = fill_missing(
-        data=all_data,
-        feature_names=feature_names,
-        fill_strategies=fill_strategies,
-        mask_suffix=MASK_SUFFIX,
-    )
-
     print("进行对数变换...")
     all_data_transformed = log_transform(
-        data=all_data_filled,
+        data=all_data,
         feature_names=feature_names,
         log_features=log_features,
         offset=LOG_OFFSET,

@@ -85,30 +85,30 @@ QX_otherdata_preprocessing: #处理降雨以外的气象数据，如温度、风
 QX_multifeature_preprocessing:
        start_time: "2020-11-12 00:00:00"
        end_time:   "2025-09-30 20:00:00"
-       lon_lat_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx"
-       output: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
+       lon_lat_path: "/home/fanyunkai/FYK_BIGATLSTM/xiangjiang5_sub_gat/Subwatershed/xiangjiang干支流.xlsx"
+       output: "/home/fanyunkai/FYK_BIGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
 
        variables:
         precip:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_preci"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_preci"
            var_name: "precipitation"
         temp:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_temp"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_temp"
            var_name: "air_temperature"
         rh:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_rh"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_rh"
            var_name: "relative_humidity"
         swd:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_swd"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_swd"
            var_name: "downward_shortwave_radiation"
         lwd:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_lwd"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_lwd"
            var_name: "downward_longwave_radiation"
         wind:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_wind"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_wind"
            var_name: "wind_speed"
         pres:
-           nc_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_pres"
+           nc_path: "/home/fanyunkai/FYK_BIGATLSTM/a_original_dataset_processed/QX_original_dataset/changjiang_pres"
            var_name: "surface_pressure"
 
 geo_matrix_construction:
@@ -206,12 +206,12 @@ data_preprocessing:
        MASK_SUFFIX: "_mask"
 
 QXmultidata_preprocessing:
-       input_qx_npy: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
-       input_qx_feature_names_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_feature_names.pkl"
-       input_qx_metadata: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_metadata.npz"
-       input_wq_path: "/home/fanyunkai/FYK_GCNLSTM/a_original_dataset_processed/WQ_processed_dataset/"
-       output_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature"
-       static_feature_path: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem/DEM/xiangjiang水质流域信息.csv"
+       input_qx_npy: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures.npy"
+       input_qx_feature_names_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_feature_names.pkl"
+       input_qx_metadata: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_metadata.npz"
+       input_wq_path: "/home/fanyunkai/FYK_biGATLSTM/a_original_dataset_processed/WQ_processed_dataset/"
+       output_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature"
+       static_feature_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/DEM/xiangjiang水质流域信息.csv"
   
        sites_names:
        - "绿埠头"
@@ -352,10 +352,10 @@ GATLSTM_training:
   TEST_RATIO: 0.15
   SEED: 42
   NUM_HEADS: 4                   # 新增：GAT注意力头数（默认1，这里设为4）
-  DATA_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/preprocessed_data_with_runoff.npy"
-  FEATURE_NAMES_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/feature_names_with_runoff.pkl"
-  ADJ_PATH: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang9_dem/GEO/GAT支流接邻矩阵.csv"
-  OUTPUT_DIR: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/results"
+  DATA_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy"
+  FEATURE_NAMES_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/feature_names.pkl"
+  ADJ_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/GEO/GAT支流接邻矩阵.csv"
+  OUTPUT_DIR: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/results"
 
   # 这里只决定 X 送进模型的特征，不决定 y
   # 想做消融就直接增删这里的名字
@@ -393,11 +393,22 @@ GATLSTM_training:
     - 林地
     - 城镇
     - 农村
-    - runoff
     - 总氮
-    - 总氮_mask
+    - 总磷
+    - 水温
     - pH
+    - 溶解氧
+    - 总氮_mask
+    - 总磷_mask
+    - 水温_mask
     - pH_mask
+    - 溶解氧_mask
+    - 总氮_dt
+    - 总磷_dt
+    - 水温_dt
+    - pH_dt
+    - 溶解氧_dt
+
 
   # 这里只决定 X 中哪些列要标准化
   # 不写的话，代码会退回到旧逻辑：非 mask 且非 sin/cos 的输入列自动标准化
@@ -431,9 +442,17 @@ GATLSTM_training:
     - 林地
     - 城镇
     - 农村
-    - runoff
     - 总氮
+    - 总磷
+    - 水温
     - pH
+    - 溶解氧
+    - 总氮_dt
+    - 总磷_dt
+    - 水温_dt
+    - pH_dt
+    - 溶解氧_dt
+
     
   # 目标变量名称（必须是 feature_names 的子集）
   target_names:
@@ -452,6 +471,152 @@ stations_val:
     - "水温"
     - "pH"
     - "溶解氧"
+
+
+GATLSTM_block_training:
+  SEQ_LEN: 12
+  BATCH_SIZE: 32
+  GCN_HIDDEN: 32                # GAT隐层维度（与代码中读取键保持一致）
+  LSTM_HIDDEN: 64
+  OUTPUT_DIM: 5                  # 预测目标数量（这里只有总氮）
+  LEARNING_RATE: 0.0001
+  PATIENCE: 5
+  MAX_EPOCHS: 300
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  NUM_HEADS: 4                   # 新增：GAT注意力头数（默认1，这里设为4）
+  DATA_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy"
+  FEATURE_NAMES_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/feature_names.pkl"
+  ADJ_PATH: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/GEO/GAT支流接邻矩阵.csv"
+  OUTPUT_DIR: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/block_results"
+
+  # 这里只决定 X 送进模型的特征，不决定 y
+  # 想做消融就直接增删这里的名字
+  input_feature_names:
+    - P4
+    - P8
+    - P12
+    - P24
+    - P48
+    - P72
+    - Imax24
+    - API72
+    - T_now
+    - T24_mean
+    - RH_now
+    - RH24_mean
+    - SWD_now
+    - SWD24_mean
+    - LWD24_mean
+    - Wind24_mean
+    - Pres_now
+    - hour_sin
+    - hour_cos
+    - month_sin
+    - month_cos
+    - year_offset
+    - 平均dem
+    - 坡度
+    - 面积
+    - 上游面积总和
+    - 河流等级
+    - 主河道长度
+    - 是否干流
+    - 耕地
+    - 林地
+    - 城镇
+    - 农村
+    - 总氮
+    - 总磷
+    - 水温
+    - pH
+    - 溶解氧
+    - 总氮_mask
+    - 总磷_mask
+    - 水温_mask
+    - pH_mask
+    - 溶解氧_mask
+    - 总氮_dt
+    - 总磷_dt
+    - 水温_dt
+    - pH_dt
+    - 溶解氧_dt
+
+
+  # 这里只决定 X 中哪些列要标准化
+  # 不写的话，代码会退回到旧逻辑：非 mask 且非 sin/cos 的输入列自动标准化
+  standardize_feature_names:
+    - P4
+    - P8
+    - P12
+    - P24
+    - P48
+    - P72
+    - Imax24
+    - API72
+    - T_now
+    - T24_mean
+    - RH_now
+    - RH24_mean
+    - SWD_now
+    - SWD24_mean
+    - LWD24_mean
+    - Wind24_mean
+    - Pres_now
+    - year_offset
+    - 平均dem
+    - 坡度
+    - 面积
+    - 上游面积总和
+    - 河流等级
+    - 主河道长度
+    - 是否干流
+    - 耕地
+    - 林地
+    - 城镇
+    - 农村
+    - 总氮
+    - 总磷
+    - 水温
+    - pH
+    - 溶解氧
+    - 总氮_dt
+    - 总磷_dt
+    - 水温_dt
+    - pH_dt
+    - 溶解氧_dt
+
+    
+  # 目标变量名称（必须是 feature_names 的子集）
+  target_names:
+    - "总氮"
+    - "总磷"
+    - "水温"
+    - "pH"
+    - "溶解氧"
+  block_masking:
+   enable_train_block_masking: true
+   train_block_lengths: [3, 6, 12, 18, 42, 180]
+   train_num_blocks_per_station: 2
+   train_block_seed: 42
+
+   enable_blocked_test: true
+   test_block_lengths: [3, 6, 12, 18, 42, 180]
+   test_num_blocks_per_station: 1
+   test_block_seed: 123
+
+stations_val:
+  OUTPUT_DIR: "/home/fanyunkai/FYK_GCNLSTM/xiangjiang11_multiQXfeature/runoff_inference/results"
+  PARAM_NAMES:
+    - "总氮"
+    - "总磷"
+    - "水温"
+    - "pH"
+    - "溶解氧"
+
+
 
   STATION_NAMES: null     # 设为 null 则自动使用 "站点0", "站点1", ...；也可指定列表，如 ["归阳镇", "城北水厂", ...]，不用改
   MAKE_PLOTLY_TS: true #不用改
