@@ -210,7 +210,7 @@ QXmultidata_preprocessing:
        input_qx_feature_names_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_feature_names.pkl"
        input_qx_metadata: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/QX/xiangjiang_qx_multifeatures_metadata.npz"
        input_wq_path: "/home/fanyunkai/FYK_biGATLSTM/a_original_dataset_processed/WQ_processed_dataset/"
-       output_path: "/home/fanyunkai/FYK_biGATLSTM/wq_saits_branch"
+       output_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang12_dtblock"
        static_feature_path: "/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/DEM/xiangjiang水质流域信息.csv"
   
        sites_names:
@@ -1554,3 +1554,95 @@ GAT_SAITS_training:
     sync_all_station_num_blocks_per_sample: 1
     sync_all_station_block_seed: 4041
 
+WQ_SAITS_BRANCH_training:
+  DATA_PATH: /home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy
+  FEATURE_NAMES_PATH: /home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/feature_names.pkl
+  OUTPUT_DIR: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/results
+
+  # 本代码只实现“第一步：水质分支”。不使用 ADJ、不使用 GAT、不使用气象分支。
+  SEQ_LEN: 384
+  WINDOW_STRIDE: 12
+  BATCH_SIZE: 4
+  D_MODEL: 128
+  N_HEAD: 4
+  N_LAYERS: 2
+  D_FF: 256
+  DROPOUT: 0.1
+  LEARNING_RATE: 0.001
+  WEIGHT_DECAY: 0.0001
+  PATIENCE: 10
+  MAX_EPOCHS: 100
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  NUM_WORKERS: 4
+  PERSISTENT_WORKERS: true
+  DEVICE: cuda
+
+  MASK_SUFFIX: '_mask'
+  DT_SUFFIX: '_dt'
+
+  target_names:
+    - '总氮'
+    - '总磷'
+    - '水温'
+    - 'pH'
+    - '溶解氧'
+
+  # 这里只放真正进入 time embedding 的特征名。
+  # 你的数据里目前是 4 个。如果以后有 day_sin/day_cos，可以直接加到这里。
+  time_feature_names:
+    - 'hour_sin'
+    - 'hour_cos'
+    - 'month_sin'
+    - 'month_cos'
+
+  # 这里只放静态站点特征。气象变量 P4/T_now/RH_now 等本阶段不使用。
+  static_feature_names:
+    - '平均dem'
+    - '坡度'
+    - '面积'
+    - '上游面积总和'
+    - '河流等级'
+    - '主河道长度'
+    - '是否干流'
+    - '耕地'
+    - '林地'
+    - '城镇'
+    - '农村'
+
+  # 上下文融合：水质是主信息，time/static/gap 是辅助信息。
+  USE_STATION_ID_EMBEDDING: true
+  CONTEXT_ALPHA_INIT: 0.1
+  OBS_RECON_LOSS_WEIGHT: 0.0   # 第一版建议 0，只在人工缺失位置算 loss。想加观测重建约束可设 0.05 或 0.1。
+
+  block_masking:
+    # all_targets：同一个连续块里 5 个水质变量一起遮住。
+    # random_variable：每次只遮住 1 个随机水质变量。
+    # random_subset：每次随机遮住若干个水质变量。
+    mask_mode: all_targets
+
+    train_block_lengths: [3, 6, 12, 18, 42, 180]
+    train_num_blocks_per_sample: 1
+    train_block_seed: 42
+
+    val_block_lengths: [3, 6, 12, 18, 42, 180]
+    val_num_blocks_per_sample: 1
+    val_block_seed: 202
+
+    # 窗口原始观测率太低时，不建议再挖人工缺失。
+    min_window_observed_ratio: 0.80
+
+    # 每个连续人工缺失块左右至少保留多少时间步上下文。
+    # 注意：SEQ_LEN=192 时，180 + 72 + 72 > 192，因此 180 会被自动判定为不适合该窗口。
+    # 如果你真要训练 180，建议 SEQ_LEN 改为 336 或 384。
+    min_context_by_length:
+      3: 12
+      6: 12
+      12: 24
+      18: 24
+      42: 48
+      180: 72
+
+    allow_fallback_shorter: true

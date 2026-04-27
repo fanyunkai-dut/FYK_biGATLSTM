@@ -49,6 +49,8 @@ STANDARDIZE_FEATURE_NAMES = cfg.get('standardize_feature_names', None)
 
 MASK_SUFFIX = cfg.get('MASK_SUFFIX', '_mask')
 DT_SUFFIX = cfg.get('DT_SUFFIX', '_dt')
+SHARED_BLOCK_LEN_NAME = cfg.get('shared_block_len_name', 'wq_block_len_shared')
+SHARED_BLOCK_POS_NAME = cfg.get('shared_block_pos_name', 'wq_block_pos_shared')
 
 # ---------- 大块遮挡配置 ----------
 block_cfg = cfg.get('block_masking', {})
@@ -79,11 +81,6 @@ set_seed(SEED)
 
 # ==================== 工具函数：大块遮挡 ====================
 def compute_dt_since_last_obs(mask_1d):
-    """
-    mask_1d: 1 表示有真实观测，0 表示缺失
-    返回：
-        dt_1d: 距离上一次真实观测过去多少个时间步
-    """
     dt = np.zeros_like(mask_1d, dtype=np.float32)
     gap = 0.0
     for t in range(len(mask_1d)):
@@ -96,12 +93,53 @@ def compute_dt_since_last_obs(mask_1d):
     return dt
 
 
-def get_history_feature_indices(input_feature_names, target_names, mask_suffix='_mask', dt_suffix='_dt'):
+def compute_block_len_pos_from_missing(missing_1d):
+    """
+    missing_1d: bool/0-1, 1 表示属于共享缺失块（当前站点时刻五个目标变量全部缺失）
+    返回：
+        block_len_1d: 缺失块长度，仅在共享缺失块位置非0
+        block_pos_1d: 块内相对位置[0,1]，仅在共享缺失块位置非0
+    """
+    missing_1d = np.asarray(missing_1d).astype(bool)
+    T = len(missing_1d)
+    block_len = np.zeros(T, dtype=np.float32)
+    block_pos = np.zeros(T, dtype=np.float32)
+
+    t = 0
+    while t < T:
+        if not missing_1d[t]:
+            t += 1
+            continue
+
+        start = t
+        while t < T and missing_1d[t]:
+            t += 1
+        end = t
+        L = end - start
+
+        block_len[start:end] = float(L)
+        if L == 1:
+            block_pos[start:end] = 0.5
+        else:
+            block_pos[start:end] = np.linspace(0.0, 1.0, L, dtype=np.float32)
+
+    return block_len, block_pos
+
+
+def get_history_feature_indices(
+    input_feature_names,
+    target_names,
+    mask_suffix='_mask',
+    dt_suffix='_dt',
+    shared_block_len_name='wq_block_len_shared',
+    shared_block_pos_name='wq_block_pos_shared'
+):
     """
     在输入特征里找到：
         - 每个目标变量本身
         - 每个目标变量对应 mask
         - 每个目标变量对应 dt
+        - 可选的共享 block_len / block_pos
     """
     value_indices = []
     mask_indices = []
@@ -123,20 +161,23 @@ def get_history_feature_indices(input_feature_names, target_names, mask_suffix='
         mask_indices.append(input_feature_names.index(mask_name))
         dt_indices.append(input_feature_names.index(dt_name))
 
-    return value_indices, mask_indices, dt_indices
+    shared_len_idx = input_feature_names.index(shared_block_len_name) if shared_block_len_name in input_feature_names else None
+    shared_pos_idx = input_feature_names.index(shared_block_pos_name) if shared_block_pos_name in input_feature_names else None
+
+    if (shared_len_idx is None) ^ (shared_pos_idx is None):
+        raise ValueError(
+            f"共享 block 特征不完整：{shared_block_len_name} / {shared_block_pos_name} 必须同时存在或同时不存在"
+        )
+
+    return value_indices, mask_indices, dt_indices, shared_len_idx, shared_pos_idx
 
 
 def choose_non_overlapping_blocks(valid_all, candidate_lengths, num_blocks, rng):
-    """
-    在单站点时间序列上选择若干个不重叠连续块。
-    valid_all: (T,) bool，要求 block 内所有时刻原本都有真实观测（五变量同时有效）
-    """
     T_local = len(valid_all)
     occupied = np.zeros(T_local, dtype=bool)
     blocks = []
 
     lengths = list(candidate_lengths)
-
     for _ in range(num_blocks):
         rng.shuffle(lengths)
         chosen = False
@@ -175,7 +216,9 @@ def apply_block_masking_to_x(
     dt_suffix='_dt',
     block_lengths=(3, 6, 12, 18),
     num_blocks_per_station=2,
-    seed=42
+    seed=42,
+    shared_block_len_name='wq_block_len_shared',
+    shared_block_pos_name='wq_block_pos_shared'
 ):
     """
     对输入序列 x_data 做单站点大块连续遮挡。
@@ -183,6 +226,7 @@ def apply_block_masking_to_x(
         - 单站点
         - 五个目标变量同时遮挡
         - 同步更新 value / mask / dt
+        - 若存在共享 block 特征，则按“五个目标变量全部缺失”重算 shared_block_len / shared_block_pos
     返回：
         x_blocked: (T, N, F_in)
         artificial_block_map: (T, N) bool，表示该站点该时刻是否被人工遮挡
@@ -192,15 +236,19 @@ def apply_block_masking_to_x(
     x_blocked = x_data.copy()
     T_local, N_local, _ = x_blocked.shape
 
-    value_idxs, mask_idxs, dt_idxs = get_history_feature_indices(
-        input_feature_names, target_names, mask_suffix, dt_suffix
+    value_idxs, mask_idxs, dt_idxs, shared_len_idx, shared_pos_idx = get_history_feature_indices(
+        input_feature_names,
+        target_names,
+        mask_suffix,
+        dt_suffix,
+        shared_block_len_name,
+        shared_block_pos_name
     )
 
     artificial_block_map = np.zeros((T_local, N_local), dtype=bool)
     station_block_counts = []
 
     for s in range(N_local):
-        # 只有当五个变量当前都是真实观测时，才允许被选为人工遮挡候选
         station_masks = np.stack([x_blocked[:, s, idx] for idx in mask_idxs], axis=1)
         valid_all = np.all(station_masks > 0.5, axis=1)
 
@@ -221,6 +269,14 @@ def apply_block_masking_to_x(
             cur_mask = x_blocked[:, s, mask_idxs[j]]
             x_blocked[:, s, dt_idx] = compute_dt_since_last_obs(cur_mask)
 
+        # 遮挡后重新计算共享缺失块特征：仅当五个目标变量同时缺失时 shared block 才成立
+        if shared_len_idx is not None and shared_pos_idx is not None:
+            station_masks_after = np.stack([x_blocked[:, s, idx] for idx in mask_idxs], axis=1)
+            shared_missing = np.all(station_masks_after < 0.5, axis=1)
+            block_len, block_pos = compute_block_len_pos_from_missing(shared_missing)
+            x_blocked[:, s, shared_len_idx] = block_len
+            x_blocked[:, s, shared_pos_idx] = block_pos
+
         station_block_counts.append(len(blocks))
 
     block_summary = {
@@ -234,13 +290,6 @@ def apply_block_masking_to_x(
 
 
 def build_affected_target_map(artificial_block_map, seq_len):
-    """
-    给定时间级别的人工遮挡图，构造样本级别的“受影响目标图”。
-    对于样本 t（预测 y_t），若其输入窗口 x[t-seq_len:t] 中某站点出现人工遮挡，
-    则该站点在这个样本中视为 affected。
-    返回：
-        affected: (num_samples, N)
-    """
     T_local, N_local = artificial_block_map.shape
     num_samples = T_local - seq_len
     affected = np.zeros((num_samples, N_local), dtype=np.float32)
@@ -287,9 +336,9 @@ for name in TARGET_NAMES:
 print(f"本次输入特征 ({len(INPUT_FEATURE_NAMES)} 个): {INPUT_FEATURE_NAMES}")
 print(f"本次目标特征 ({len(TARGET_NAMES)} 个): {TARGET_NAMES}")
 
-x_full = full_data[:, :, INPUT_IDXS]     # (T, N, F_in)
-y_full = full_data[:, :, TARGET_IDXS]    # (T, N, F_out)
-mask_full = full_data[:, :, MASK_IDXS]   # (T, N, F_out)
+x_full = full_data[:, :, INPUT_IDXS]
+y_full = full_data[:, :, TARGET_IDXS]
+mask_full = full_data[:, :, MASK_IDXS]
 
 F_in = x_full.shape[-1]
 F_out = y_full.shape[-1]
@@ -333,7 +382,9 @@ if ENABLE_TRAIN_BLOCK_MASKING:
         dt_suffix=DT_SUFFIX,
         block_lengths=TRAIN_BLOCK_LENGTHS,
         num_blocks_per_station=TRAIN_NUM_BLOCKS_PER_STATION,
-        seed=TRAIN_BLOCK_SEED
+        seed=TRAIN_BLOCK_SEED,
+        shared_block_len_name=SHARED_BLOCK_LEN_NAME,
+        shared_block_pos_name=SHARED_BLOCK_POS_NAME
     )
     print("训练遮挡摘要:", train_block_summary)
 else:
@@ -353,7 +404,9 @@ if ENABLE_BLOCKED_TEST:
             dt_suffix=DT_SUFFIX,
             block_lengths=[L],
             num_blocks_per_station=TEST_NUM_BLOCKS_PER_STATION,
-            seed=cur_seed
+            seed=cur_seed,
+            shared_block_len_name=SHARED_BLOCK_LEN_NAME,
+            shared_block_pos_name=SHARED_BLOCK_POS_NAME
         )
         blocked_test_raw_dict[L] = {
             "x_raw": x_blocked_test_raw,
@@ -390,7 +443,7 @@ else:
 
 print(f"\nX 中需要标准化的特征 ({len(standardize_names_used)} 个): {standardize_names_used}")
 
-# ==================== 计算训练集 X 的统计量（忽略 NaN） ====================
+
 def fit_x_scaler_nanaware(x_data, norm_indices, input_feature_names):
     means = []
     stds = []
@@ -417,11 +470,9 @@ def fit_x_scaler_nanaware(x_data, norm_indices, input_feature_names):
     return np.array(means, dtype=np.float32), np.array(stds, dtype=np.float32), used_names
 
 
-x_means, x_stds, standardize_names_used = fit_x_scaler_nanaware(
-    train_x_raw, norm_indices, INPUT_FEATURE_NAMES
-)
+x_means, x_stds, standardize_names_used = fit_x_scaler_nanaware(train_x_raw, norm_indices, INPUT_FEATURE_NAMES)
 
-# ==================== 计算训练集 y 的统计量（只用 mask=1 的真实观测） ====================
+
 def fit_target_scaler(y_data, mask_data, target_names):
     y_means = np.zeros(len(target_names), dtype=np.float32)
     y_stds = np.ones(len(target_names), dtype=np.float32)
@@ -444,7 +495,7 @@ def fit_target_scaler(y_data, mask_data, target_names):
 y_means, y_stds = fit_target_scaler(train_y_raw, train_mask_raw, TARGET_NAMES)
 print(f"y 将按 target_names 自动标准化: {TARGET_NAMES}")
 
-# ==================== 标准化 X 和 y（保留 NaN，后面再统一填0） ====================
+
 def apply_standardization_nanaware(data, norm_indices, means, stds):
     data_norm = data.copy()
     for idx, mean, std in zip(norm_indices, means, stds):
@@ -475,9 +526,10 @@ test_y  = apply_target_standardization_nanaware(test_y_raw,  test_mask_raw,  y_m
 
 print("X 与 y 标准化完成（目前仍保留 NaN）。")
 
-# ==================== 标准化后统一把 NaN 换成 0 ====================
+
 def replace_nan_with_zero(arr):
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
 
 train_x = replace_nan_with_zero(train_x)
 val_x   = replace_nan_with_zero(val_x)
@@ -492,7 +544,6 @@ test_y  = replace_nan_with_zero(test_y)
 
 print("已将标准化后的 X / y 中所有 NaN 统一替换为 0。")
 
-# ==================== 保存标准化参数 ====================
 scaler_params = {
     'x_means': x_means,
     'x_stds': x_stds,
@@ -509,7 +560,7 @@ with open(os.path.join(OUTPUT_DIR, 'scaler.pkl'), 'wb') as f:
     pickle.dump(scaler_params, f)
 print("标准化参数已保存到 scaler.pkl")
 
-# ==================== 为每个数据集构建滑动窗口样本 ====================
+
 def build_samples(x_data, y_data, mask_data, seq_len):
     T_local = x_data.shape[0]
     X_list, y_list, mask_list = [], [], []
@@ -547,7 +598,6 @@ for L, x_blocked_std in blocked_test_x_dict.items():
 print(f"训练样本数: {train_X.shape[0]}, 验证样本数: {val_X.shape[0]}, 自然测试样本数: {test_X.shape[0]}")
 print(f"X 形状: {train_X.shape}, y 形状: {train_y_samples.shape}, mask 形状: {train_mask.shape}")
 
-# ==================== 创建 DataLoader ====================
 train_dataset = TensorDataset(
     torch.tensor(train_X, dtype=torch.float32),
     torch.tensor(train_y_samples, dtype=torch.float32),
@@ -704,7 +754,7 @@ model = GAT_LSTM(
     num_heads=NUM_HEADS
 ).to(device)
 
-# ==================== 定义损失函数和优化器 ====================
+
 def masked_mse_loss(pred, target, mask):
     loss = (pred - target) ** 2
     loss = loss * mask
@@ -719,7 +769,6 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 best_val_loss = float('inf')
 counter = 0
 
-# ==================== 训练循环 ====================
 print("\n开始训练...")
 for epoch in range(MAX_EPOCHS):
     model.train()
@@ -767,7 +816,7 @@ for epoch in range(MAX_EPOCHS):
             print(f"Early stopping at epoch {epoch + 1}")
             break
 
-# ==================== 评估工具 ====================
+
 def run_prediction(loader):
     all_preds = []
     all_targets = []
@@ -824,12 +873,10 @@ def save_prediction_triplet(output_dir, prefix, pred, target, mask):
     np.save(os.path.join(output_dir, f'{prefix}_mask.npy'), mask)
 
 
-# ==================== 加载最佳模型 ====================
 print("\n加载最佳模型进行测试...")
 model.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, 'best_model.pth'), map_location=device))
 model.eval()
 
-# ---------- natural test ----------
 test_pred, test_target, test_mask_eval = run_prediction(test_loader)
 save_prediction_triplet(OUTPUT_DIR, 'test', test_pred, test_target, test_mask_eval)
 
@@ -841,7 +888,7 @@ print(f"RMSE: {natural_metrics['RMSE']:.4f}")
 print(f"MAE: {natural_metrics['MAE']:.4f}")
 print(f"n_valid: {natural_metrics['n_valid']}")
 
-# ---------- save train / val preds ----------
+
 def save_predictions(loader, name):
     pred_concat, target_concat, mask_concat = run_prediction(loader)
     save_prediction_triplet(OUTPUT_DIR, name, pred_concat, target_concat, mask_concat)
@@ -851,7 +898,6 @@ def save_predictions(loader, name):
 save_predictions(train_loader, 'train')
 save_predictions(val_loader, 'val')
 
-# ---------- blocked test ----------
 blocked_metrics_all = {}
 
 if ENABLE_BLOCKED_TEST:
@@ -876,7 +922,6 @@ if ENABLE_BLOCKED_TEST:
                 f"n_valid={metrics_blocked['n_valid']}"
             )
 
-# ==================== 保存结果汇总 ====================
 with open(os.path.join(OUTPUT_DIR, 'Configs and results.txt'), 'w', encoding='utf-8') as f:
     f.write("========== Configuration ==========\n")
     f.write(f"SEQ_LEN: {SEQ_LEN}\n")
@@ -899,6 +944,8 @@ with open(os.path.join(OUTPUT_DIR, 'Configs and results.txt'), 'w', encoding='ut
     f.write(f"INPUT_FEATURE_NAMES: {INPUT_FEATURE_NAMES}\n")
     f.write(f"STANDARDIZE_FEATURE_NAMES: {standardize_names_used}\n")
     f.write(f"TARGET_NAMES: {TARGET_NAMES}\n")
+    f.write(f"SHARED_BLOCK_LEN_NAME: {SHARED_BLOCK_LEN_NAME}\n")
+    f.write(f"SHARED_BLOCK_POS_NAME: {SHARED_BLOCK_POS_NAME}\n")
     f.write("\n========== Block Masking ==========\n")
     f.write(f"ENABLE_TRAIN_BLOCK_MASKING: {ENABLE_TRAIN_BLOCK_MASKING}\n")
     f.write(f"TRAIN_BLOCK_LENGTHS: {TRAIN_BLOCK_LENGTHS}\n")
@@ -930,7 +977,6 @@ with open(os.path.join(OUTPUT_DIR, 'Configs and results.txt'), 'w', encoding='ut
                 )
         f.write("========================================================\n")
 
-# ==================== 保存自然测试散点图 ====================
 valid_idx = test_mask_eval > 0.5
 pred_valid = test_pred[valid_idx]
 target_valid = test_target[valid_idx]
@@ -955,3 +1001,4 @@ plt.savefig(os.path.join(OUTPUT_DIR, 'scatter_natural_test_overall.png'), dpi=15
 plt.close()
 
 print(f"\n散点图已保存到 {OUTPUT_DIR}")
+

@@ -1554,3 +1554,234 @@ GAT_SAITS_training:
     sync_all_station_num_blocks_per_sample: 1
     sync_all_station_block_seed: 4041
 
+WQ_SAITS_BRANCH_training:
+  DATA_PATH: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/preprocessed_data.npy
+  FEATURE_NAMES_PATH: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/feature_names.pkl
+  OUTPUT_DIR: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/results
+
+  # 本代码只实现“第一步：水质分支”。不使用 ADJ、不使用 GAT、不使用气象分支。
+  SEQ_LEN: 384
+  WINDOW_STRIDE: 12
+  BATCH_SIZE: 4
+  D_MODEL: 128
+  N_HEAD: 4
+  N_LAYERS: 2
+  D_FF: 256
+  DROPOUT: 0.1
+  LEARNING_RATE: 0.001
+  WEIGHT_DECAY: 0.0001
+  PATIENCE: 10
+  MAX_EPOCHS: 100
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  NUM_WORKERS: 4
+  PERSISTENT_WORKERS: true
+  DEVICE: cuda
+
+  MASK_SUFFIX: '_mask'
+  DT_SUFFIX: '_dt'
+
+  target_names:
+    - '总氮'
+    - '总磷'
+    - '水温'
+    - 'pH'
+    - '溶解氧'
+
+  # 这里只放真正进入 time embedding 的特征名。
+  # 你的数据里目前是 4 个。如果以后有 day_sin/day_cos，可以直接加到这里。
+  time_feature_names:
+    - 'year_id'
+    - 'month_id'
+    - 'day_id'
+    - 'hour_id'
+  USE_CALENDAR_TIME_EMBEDDING: True
+  YEAR_EMB_DIM: 4
+  MONTH_EMB_DIM: 4
+  DAY_EMB_DIM: 4
+  HOUR_EMB_DIM: 4
+  # 这里只放静态站点特征。气象变量 P4/T_now/RH_now 等本阶段不使用。
+  static_feature_names:
+    - '平均dem'
+    - '坡度'
+    - '面积'
+    - '上游面积总和'
+    - '河流等级'
+    - '主河道长度'
+    - '是否干流'
+    - '耕地'
+    - '林地'
+    - '城镇'
+    - '农村'
+
+  # 上下文融合：水质是主信息，time/static/gap 是辅助信息。
+  USE_STATION_ID_EMBEDDING: true
+  CONTEXT_ALPHA_INIT: 0.1
+  OBS_RECON_LOSS_WEIGHT: 0.0   # 第一版建议 0，只在人工缺失位置算 loss。想加观测重建约束可设 0.05 或 0.1。
+
+  block_masking:
+    # all_targets：同一个连续块里 5 个水质变量一起遮住。
+    # random_variable：每次只遮住 1 个随机水质变量。
+    # random_subset：每次随机遮住若干个水质变量。
+    mask_mode: all_targets
+
+    train_block_lengths: [3, 6, 12, 18, 42, 180]
+    train_num_blocks_per_sample: 1
+    train_block_seed: 42
+
+    val_block_lengths: [3, 6, 12, 18, 42, 180]
+    val_num_blocks_per_sample: 1
+    val_block_seed: 202
+
+    # 窗口原始观测率太低时，不建议再挖人工缺失。
+    min_window_observed_ratio: 0.80
+
+    # 每个连续人工缺失块左右至少保留多少时间步上下文。
+    # 注意：SEQ_LEN=192 时，180 + 72 + 72 > 192，因此 180 会被自动判定为不适合该窗口。
+    # 如果你真要训练 180，建议 SEQ_LEN 改为 336 或 384。
+    min_context_by_length:
+      3: 12
+      6: 12
+      12: 24
+      18: 24
+      42: 48
+      180: 72
+
+    allow_fallback_shorter: true
+
+
+WQ_MET_CONTEXT_SAITS_training:
+  DATA_PATH: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/preprocessed_data.npy
+  FEATURE_NAMES_PATH: /home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/feature_names.pkl
+  OUTPUT_DIR: /home/fanyunkai/FYK_biGATLSTM/wq_saits_qx_branch/results
+
+  # Strong SAITS 主干 + 气象条件分支
+  # 气象分支：动态气象特征单独编码，通过 cross-attention 注入 SAITS 的两个 stage。
+  SEQ_LEN: 384
+  WINDOW_STRIDE: 12
+  BATCH_SIZE: 4
+  D_MODEL: 128
+  N_HEAD: 4
+  N_LAYERS: 2
+  D_FF: 256
+  DROPOUT: 0.1
+  LEARNING_RATE: 0.001
+  WEIGHT_DECAY: 0.0001
+  PATIENCE: 10
+  MAX_EPOCHS: 100
+  TRAIN_RATIO: 0.7
+  VAL_RATIO: 0.15
+  TEST_RATIO: 0.15
+  SEED: 42
+  NUM_WORKERS: 4
+  PERSISTENT_WORKERS: true
+
+  MASK_SUFFIX: '_mask'
+  DT_SUFFIX: '_dt'
+
+  target_names:
+    - '总氮'
+    - '总磷'
+    - '水温'
+    - 'pH'
+    - '溶解氧'
+
+  # 预处理后生成的时间类别编号。不要标准化，不要当连续特征。
+  time_feature_names:
+    - 'year_id'
+    - 'month_id'
+    - 'day_id'
+    - 'hour_id'
+
+  USE_CALENDAR_TIME_EMBEDDING: true
+  YEAR_EMB_DIM: 4
+  MONTH_EMB_DIM: 4
+  DAY_EMB_DIM: 4
+  HOUR_EMB_DIM: 4
+  # NUM_YEARS 可以不写，代码会按 year_id 自动推断。
+  # NUM_YEARS: 4
+
+  # 动态气象/外部条件特征：进入气象分支。
+  meteorological_feature_names:
+   - 'P4'
+   - 'P12'
+   - 'P24'
+   - 'P72'
+   - 'Imax24'
+   - 'API72'
+   - 'T_now'
+   - 'T24_mean'
+   - 'SWD24_mean'
+   - 'Wind24_mean'
+   - 'SWD_now'
+  # 静态站点属性：仍作为水质分支和气象分支的站点背景条件。
+  static_feature_names:
+    - '平均dem'
+    - '坡度'
+    - '面积'
+    - '上游面积总和'
+    - '河流等级'
+    - '主河道长度'
+    - '是否干流'
+    - '耕地'
+    - '林地'
+    - '城镇'
+    - '农村'
+
+  # 水质主分支上下文融合
+  USE_STATION_ID_EMBEDDING: true
+  CONTEXT_ALPHA_INIT: 0.1
+  OBS_RECON_LOSS_WEIGHT: 0.0
+
+  # 气象条件分支
+  USE_MET_BRANCH: true
+  MET_N_HEAD: 4
+  MET_N_LAYERS: 1
+  MET_D_FF: 256
+  MET_DROPOUT: 0.1
+  MET_CROSS_HEADS: 4
+  MET_ALPHA_INIT: 0.1
+  MET_CONTEXT_ALPHA_INIT: 0.1
+  MET_USE_TIME_CONTEXT: true
+  MET_USE_STATIC_CONTEXT: true
+  MET_USE_STATION_CONTEXT: true
+
+  block_masking:
+    # all_targets：同一个连续块里 5 个水质变量一起遮住，更接近多参数探头停机。
+    # random_variable：每次只遮住 1 个随机水质变量。
+    # random_subset：每次随机遮住若干个水质变量。
+    mask_mode: all_targets
+
+    train_block_lengths: [3, 6, 12, 18, 42, 180]
+    train_num_blocks_per_sample: 1
+    train_block_seed: 42
+
+    val_block_lengths: [3, 6, 12, 18, 42, 180]
+    val_num_blocks_per_sample: 1
+    val_block_seed: 202
+
+    test_block_lengths: [3, 6, 12, 18, 42, 180]
+    test_num_blocks_per_sample: 1
+    test_block_seed: 303
+
+    min_window_observed_ratio: 0.80
+
+    # 180 小时缺失需要左右都有足够上下文；SEQ_LEN=384 时比较合理。
+    min_context_by_length:
+      3: 12
+      6: 12
+      9: 24
+      12: 24
+      18: 24
+      42: 48
+      180: 72
+
+    allow_fallback_shorter: true
+
+  # 训练完成后专门按这些连续缺失长度在测试集评估。
+  TEST_EVAL_BLOCK_LENGTHS: [3, 6, 9, 12, 18, 42, 180]
+  TEST_EVAL_BLOCK_SEED: 5051
+  MAX_SCATTER_POINTS_PER_TARGET: 20000
+  EVAL_IN_ORIGINAL_SCALE: false

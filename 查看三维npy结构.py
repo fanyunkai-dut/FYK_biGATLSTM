@@ -1,7 +1,7 @@
 import numpy as np
 
 # 加载数据
-data = np.load('/home/fanyunkai/FYK_biGATLSTM/xiangjiang11_multiQXfeature/preprocessed_data.npy', allow_pickle=True)  # 请替换为实际文件路径
+data = np.load('/home/fanyunkai/FYK_biGATLSTM/wq_saits_branch/preprocessed_data.npy', allow_pickle=True)  # 请替换为实际文件路径
 
 # 检查维度
 if data.ndim == 3:

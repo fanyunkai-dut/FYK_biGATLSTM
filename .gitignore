@@ -9,3 +9,7 @@
 *.html
 *.pkl
 *.pth
+*.json
+*.log
+*.pt
+*.pyc
